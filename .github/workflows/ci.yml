@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show the toolchain
+        run: swift --version
+      - name: Build
+        run: swift build --build-tests
+      - name: Test
+        run: swift test
+
+  integration:
+    name: End-to-end on a real image
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      # The e2fsprogs build is the slow part and only changes when the pin does.
+      - name: Cache e2fsprogs
+        id: cache-e2fsprogs
+        uses: actions/cache@v4
+        with:
+          path: libexec/e2fsprogs
+          key: e2fsprogs-${{ runner.os }}-${{ hashFiles('vendor/e2fsprogs/PINNED', 'vendor/e2fsprogs/patches/*.patch', 'Scripts/build-e2fsprogs.sh') }}
+
+      - name: Build e2fsprogs
+        if: steps.cache-e2fsprogs.outputs.cache-hit != 'true'
+        run: Scripts/build-e2fsprogs.sh
+
+      - name: Build simpleshrink
+        run: swift build
+
+      # hdiutil attach works on the hosted runners, so the whole pipeline is exercised.
+      - name: Shrink a fixture image
+        run: Scripts/integration-test.sh
+
+  release:
+    name: Package
+    runs-on: macos-15
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [unit, integration]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the package
+        env:
+          SIGN_APP_IDENTITY: ${{ secrets.SIGN_APP_IDENTITY }}
+          SIGN_INSTALLER_IDENTITY: ${{ secrets.SIGN_INSTALLER_IDENTITY }}
+          NOTARY_PROFILE: ${{ secrets.NOTARY_PROFILE }}
+        # Signing and notarisation only happen when the secrets are configured;
+        # a fork building a tag still gets an unsigned package it can inspect.
+        run: |
+          if [ -n "$SIGN_APP_IDENTITY" ]; then
+            Scripts/package.sh --notarize
+          else
+            Scripts/package.sh
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SimpleShrink-pkg
+          path: dist/*.pkg

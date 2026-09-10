@@ -1,0 +1,11 @@
+.DS_Store
+.build/
+.swiftpm/
+*.xcodeproj
+/build/
+/dist/
+/vendor/e2fsprogs/src/
+/vendor/e2fsprogs/build/
+/vendor/e2fsprogs/*.tar.*
+/libexec/
+Tests/Fixtures/*.img

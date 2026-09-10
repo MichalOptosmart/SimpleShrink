@@ -1,0 +1,5 @@
+# The exact upstream release SimpleShrink builds and ships.
+# Scripts/build-e2fsprogs.sh reads this file; nothing else selects a version.
+E2FSPROGS_VERSION=1.47.4
+E2FSPROGS_SHA256=fd5bf388cbdbe006a3d3b318d983b2948382440acc85a87f1e7d108653e8db0b
+E2FSPROGS_URL=https://mirrors.edge.kernel.org/pub/linux/kernel/people/tytso/e2fsprogs/v1.47.4/e2fsprogs-1.47.4.tar.xz

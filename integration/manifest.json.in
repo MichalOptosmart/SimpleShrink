@@ -1,0 +1,32 @@
+{
+  "identifier": "cz.optosmart.simpleshrink",
+  "name": "SimpleShrink",
+  "version": "@VERSION@",
+  "protocol": 1,
+  "license": "GPL-2.0-only",
+  "homepage": "https://github.com/optosmart/simpleshrink",
+  "platform": "macOS 15+, universal (arm64, x86_64)",
+  "requiresPrivileges": false,
+  "executable": "bin/simpleshrink",
+  "capabilities": [
+    {
+      "id": "shrink",
+      "verb": "transform",
+      "appliesTo": ["image"],
+      "titles": {
+        "en": "Shrink disk image",
+        "cs": "Zmenšit obraz disku",
+        "de": "Datenträgerabbild verkleinern",
+        "sk": "Zmenšiť obraz disku"
+      },
+      "options": [
+        "freeSpaceMiB",
+        "expansion",
+        "armExpansion",
+        "outputPath",
+        "extractMode",
+        "dryRun"
+      ]
+    }
+  ]
+}
