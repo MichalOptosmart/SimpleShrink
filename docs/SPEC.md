@@ -534,28 +534,58 @@ The exact configure line is recorded in `THIRD-PARTY.md`; it is part of the
 
 ## 11. Distribution
 
-**Ship a signed, notarised, stapled `.pkg`** that installs into
-`~/Library/Application Support/SimpleShrink/`.
+**Ship a self-signed universal tarball**, built by `Scripts/package.sh`:
 
-The reasoning matters:
+```
+SimpleShrink-1.0.0/
+├── bin/simpleshrink
+├── libexec/e2fsprogs/{e2fsck,resize2fs,dumpe2fs,debugfs}
+├── share/{COPYING,THIRD-PARTY.md,README.md,INTEGRATION.md}
+├── manifest.json
+└── install.sh
+```
 
-* A notarisation ticket **cannot be stapled to a loose executable** — only to bundles,
-  disk images and packages. Without stapling, Gatekeeper needs a network round-trip on
-  every launch.
-* Files installed by a `.pkg` do **not** carry `com.apple.quarantine`. A `.dmg` with
-  drag-install would quarantine every copied file, and a host that refuses to execute
-  quarantined helpers would then refuse this one.
+`install.sh` copies the tree to `~/Library/Application Support/SimpleShrink` and can
+symlink `bin/simpleshrink` into `/usr/local/bin`. `bin/` and `libexec/` must stay
+siblings — that relative layout is how the tool finds e2fsprogs (§9.1).
 
-Build with `pkgbuild --install-location` plus `productbuild` with
-`domains enable_currentUserHome="true"`. Sign every binary with Developer ID Application,
-hardened runtime and a secure timestamp; sign the package with Developer ID Installer;
-submit with `notarytool`; `stapler staple` the result. `Scripts/package.sh` does all of
-this and refuses to build a tagged release whose tag does not match `Version.swift`.
+Every Mach-O in the payload is signed: ad-hoc (`codesign -s -`) by default, or with a
+self-signed certificate when one is passed. arm64 requires *a* signature, and signing
+everything keeps the payload uniform.
 
-The same `.pkg` also installs a symlink into `/usr/local/bin` — optional component,
-default off — for standalone command-line use.
+### 11.1 No notarisation, and what that costs
 
----
+There is deliberately no Developer ID signature, no notarisation and no `.pkg`.
+
+Notarisation requires a paid Apple Developer membership, and what it buys is one thing:
+an archive that opens by double-click after a browser download. For a GPL-2.0-only tool
+whose primary install path is "clone it and run `swift build`", routing every release
+through Apple to make it look trustworthy is disproportionate — the source, the pinned
+e2fsprogs checksum and the published SHA-256 of the archive are the trust story.
+
+The cost is Gatekeeper, and it is worth stating plainly rather than discovering:
+
+* A browser marks the downloaded archive `com.apple.quarantine`. Archive Utility
+  **propagates that flag to every extracted file**, and Gatekeeper then refuses to run
+  the binaries.
+* Unpacking with `tar` in a terminal does not propagate it, which is why the release
+  notes give the `tar -xzf` line rather than saying "double-click".
+* `install.sh` clears the flag from what it installs, for anyone who unpacked the
+  archive the other way.
+
+A `.pkg` would not avoid any of this without a Developer ID Installer certificate — an
+unsigned one is blocked by Gatekeeper just the same, while adding `pkgbuild`,
+`productbuild` and a distribution XML to maintain.
+
+If a friction-free install becomes worth having later, a Homebrew tap is the cheaper
+answer than notarisation: `brew` builds or unpacks without setting quarantine at all.
+
+### 11.2 Release checklist
+
+* `Scripts/package.sh` refuses to build a tagged release whose tag disagrees with
+  `Version.swift`.
+* The archive ships with a `.sha256` file; publish that checksum in the release notes.
+* Publish the corresponding e2fsprogs source alongside the binaries, per §2.3.
 
 ## 12. Testing
 
@@ -596,8 +626,8 @@ reports `skipped` and changes nothing, and a protocol-mode run.
 
 GitHub Actions on `macos-15`: unit tests, then the end-to-end script against a fixture —
 `hdiutil attach` works on the hosted runners. The e2fsprogs build is cached by the
-contents of `vendor/e2fsprogs/PINNED`. Packaging, signing and notarisation run only on
-tags.
+contents of `vendor/e2fsprogs/PINNED`. Packaging runs only on tags and needs no secrets,
+because releases are self-signed (§11).
 
 ---
 
@@ -610,7 +640,7 @@ tags.
 | S2 | `ShrinkPipeline` end to end with rollback, `shrink` | Core function |
 | S3 | `Expansion.swift`, both strategies, fixture coverage | |
 | S4 | Integration mode: `describe`, `run`, NDJSON, signal handling | Host integration |
-| S5 | Packaging: universal build, signing, notarisation, `.pkg`, stapling | Distribution |
+| S5 | Packaging: universal build, self-signed tarball, `install.sh`, checksums | Distribution |
 | S6 | Full test matrix, CI, GPL compliance checklist, README | Release |
 
 **S0 gates the project.** If e2fsprogs cannot be made to work reliably against

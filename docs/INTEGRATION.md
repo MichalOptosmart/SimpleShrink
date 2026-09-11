@@ -20,18 +20,19 @@ Everything below is stable within protocol version 1. See [Versioning](#8-versio
 
 ## 1. Installing and finding the tool
 
-A packaged install lays out:
+A release is a tarball that unpacks to:
 
 ```
 <install root>/
 ├── bin/simpleshrink              The executable
 ├── libexec/e2fsprogs/            e2fsck, resize2fs, dumpe2fs, debugfs
 ├── manifest.json                 Machine-readable description (see §2)
-└── share/                        COPYING, THIRD-PARTY.md, README.md
+├── share/                        COPYING, THIRD-PARTY.md, README.md, INTEGRATION.md
+└── install.sh                    Copies the tree into place, optionally symlinks it
 ```
 
-The default install root is `~/Library/Application Support/SimpleShrink`, and the
-package optionally symlinks `bin/simpleshrink` into `/usr/local/bin`.
+The default install root is `~/Library/Application Support/SimpleShrink`, and
+`install.sh --link` symlinks `bin/simpleshrink` into `/usr/local/bin`.
 
 `bin/simpleshrink` finds its e2fsprogs binaries at `../libexec/e2fsprogs` relative to
 itself. **`PATH` is never searched** — a `PATH`-resolved `resize2fs` running against a
@@ -39,6 +40,13 @@ user's image is a hijack this tool must not be vulnerable to. A host that reloca
 binaries must keep that relative layout, or set `SIMPLESHRINK_E2FSPROGS_DIR`.
 
 A host should invoke the executable by absolute path, with a controlled environment.
+
+**The binaries are self-signed, not notarised.** A host that ships or copies them itself
+must make sure they do not carry `com.apple.quarantine` — Gatekeeper refuses to execute
+quarantined code that has no Developer ID, and the failure surfaces as the process
+dying rather than as an error this tool can report. Copying with `cp` preserves the
+flag if the source has it; `xattr -dr com.apple.quarantine <install root>` clears it,
+and that is what the bundled `install.sh` does.
 
 ## 2. Discovery — `describe`
 

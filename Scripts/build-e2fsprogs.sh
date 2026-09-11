@@ -72,8 +72,8 @@ build_arch arm64
 build_arch x86_64
 
 # What ships. mke2fs is built too — Scripts/make-fixture.sh needs it — but it stays in
-# the build tree: every binary in the release is one more thing to sign, notarise and
-# account for in THIRD-PARTY.md.
+# the build tree: every binary in the release is one more thing to sign and to account
+# for in THIRD-PARTY.md.
 SHIPPED=(e2fsck/e2fsck resize/resize2fs misc/dumpe2fs debugfs/debugfs)
 FIXTURE_ONLY=(misc/mke2fs)
 

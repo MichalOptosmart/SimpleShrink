@@ -53,10 +53,25 @@ package carries everything.
 
 ## Install
 
-Download the notarised `.pkg` from
-[Releases](https://github.com/optosmart/simpleshrink/releases) and open it. It installs
-into `~/Library/Application Support/SimpleShrink`, and can optionally symlink
+Download the tarball from
+[Releases](https://github.com/optosmart/simpleshrink/releases), then, **in a terminal**:
+
+```console
+$ shasum -a 256 -c SimpleShrink-1.0.0.tar.gz.sha256
+$ tar -xzf SimpleShrink-1.0.0.tar.gz
+$ ./SimpleShrink-1.0.0/install.sh --link
+```
+
+That installs into `~/Library/Application Support/SimpleShrink` and symlinks
 `simpleshrink` into `/usr/local/bin`.
+
+Unpack with `tar`, not by double-clicking: the binaries are **self-signed, not
+notarised**, and Archive Utility would tag every extracted file with the download's
+quarantine flag, after which Gatekeeper refuses to run them. `tar` does not propagate
+the flag, and `install.sh` clears it from what it installs. Notarisation is skipped on
+purpose — it needs a paid Developer ID, and for a GPL tool that most people build
+themselves it buys nothing but a double-click. The reasoning is in
+[docs/SPEC.md §11](docs/SPEC.md).
 
 ### From source
 

@@ -1,40 +1,38 @@
 #!/bin/bash
 # SimpleShrink — Copyright (C) 2026 OptoSmart. GPL-2.0-only, see COPYING.
 #
-# Builds a universal release and wraps it in a signed, notarised, stapled .pkg.
+# Builds a universal release and packs it into a self-contained tarball.
 #
-#   Scripts/package.sh [--sign] [--notarize]
+#   Scripts/package.sh [--identity <name>]
 #
-# Signing needs, in the environment:
-#   SIGN_APP_IDENTITY        "Developer ID Application: …"
-#   SIGN_INSTALLER_IDENTITY  "Developer ID Installer: …"
-#   NOTARY_PROFILE           a notarytool keychain profile name
+# Signing: every Mach-O in the payload is signed, ad-hoc by default. Pass --identity
+# (or set SIGN_IDENTITY) to use a self-signed certificate from the keychain instead.
 #
-# Why a .pkg rather than a .dmg or a bare binary: a notarisation ticket can only be
-# stapled to a bundle, a disk image or a package — a loose executable needs a network
-# round trip on every launch — and files installed by a .pkg do not carry
-# com.apple.quarantine, which a .dmg drag-install would put on every copied file.
+# There is deliberately no notarisation and no .pkg. Notarisation needs a paid Developer
+# ID, and all it buys is a double-clickable download — a GPL tool whose primary install
+# path is "build it yourself" does not need to route through Apple to be trustworthy.
+# The trade-off is Gatekeeper: a tarball downloaded by a browser is quarantined, so the
+# release notes tell people to unpack it with `tar` in a terminal (which does not
+# propagate the quarantine flag) or to clear the flag themselves. See docs/SPEC.md §11.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST="$ROOT/dist"
-STAGE="$DIST/root"
 VERSION="$(sed -n 's/.*let version = "\(.*\)"/\1/p' "$ROOT/Sources/SimpleShrinkKit/Version.swift")"
-IDENTIFIER="cz.optosmart.simpleshrink"
-INSTALL_LOCATION="Library/Application Support/SimpleShrink"
+IDENTITY="${SIGN_IDENTITY:--}"
+NAME="SimpleShrink-$VERSION"
+STAGE="$DIST/$NAME"
 
-DO_SIGN=0
-DO_NOTARIZE=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        --sign) DO_SIGN=1; shift ;;
-        --notarize) DO_SIGN=1; DO_NOTARIZE=1; shift ;;
-        *) echo "usage: $0 [--sign] [--notarize]" >&2; exit 1 ;;
+        --identity) IDENTITY="$2"; shift 2 ;;
+        *) echo "usage: $0 [--identity <name>]" >&2; exit 1 ;;
     esac
 done
 
 echo "==> SimpleShrink $VERSION"
 
+# A tag must never disagree with the version the binary reports.
 if [ -n "${GITHUB_REF_NAME:-}" ] && [ "${GITHUB_REF_NAME#v}" != "$GITHUB_REF_NAME" ]; then
     if [ "${GITHUB_REF_NAME#v}" != "$VERSION" ]; then
         echo "error: tag ${GITHUB_REF_NAME} does not match Version.swift ($VERSION)" >&2
@@ -43,73 +41,86 @@ if [ -n "${GITHUB_REF_NAME:-}" ] && [ "${GITHUB_REF_NAME#v}" != "$GITHUB_REF_NAM
 fi
 
 rm -rf "$DIST"
-mkdir -p "$STAGE/$INSTALL_LOCATION/bin" "$STAGE/$INSTALL_LOCATION/libexec/e2fsprogs" \
-         "$STAGE/$INSTALL_LOCATION/share"
+mkdir -p "$STAGE/bin" "$STAGE/libexec/e2fsprogs" "$STAGE/share"
 
 echo "==> Building e2fsprogs"
-"$ROOT/Scripts/build-e2fsprogs.sh" --prefix "$STAGE/$INSTALL_LOCATION/libexec/e2fsprogs"
+"$ROOT/Scripts/build-e2fsprogs.sh" --prefix "$STAGE/libexec/e2fsprogs"
 
 echo "==> Building simpleshrink (universal)"
 swift build -c release --arch arm64 --arch x86_64 --package-path "$ROOT"
-cp "$(swift build -c release --arch arm64 --arch x86_64 --package-path "$ROOT" --show-bin-path)/simpleshrink" \
-   "$STAGE/$INSTALL_LOCATION/bin/simpleshrink"
+BIN_PATH="$(swift build -c release --arch arm64 --arch x86_64 --package-path "$ROOT" --show-bin-path)"
+cp "$BIN_PATH/simpleshrink" "$STAGE/bin/simpleshrink"
 
 echo "==> Generating the integration manifest"
-sed "s/@VERSION@/$VERSION/g" "$ROOT/integration/manifest.json.in" \
-    > "$STAGE/$INSTALL_LOCATION/manifest.json"
-cp "$ROOT/COPYING" "$ROOT/THIRD-PARTY.md" "$ROOT/README.md" "$STAGE/$INSTALL_LOCATION/share/"
+sed "s/@VERSION@/$VERSION/g" "$ROOT/integration/manifest.json.in" > "$STAGE/manifest.json"
+cp "$ROOT/COPYING" "$ROOT/THIRD-PARTY.md" "$ROOT/README.md" "$STAGE/share/"
+cp "$ROOT/docs/INTEGRATION.md" "$STAGE/share/"
 
-if [ "$DO_SIGN" = 1 ]; then
-    : "${SIGN_APP_IDENTITY:?set SIGN_APP_IDENTITY}"
-    echo "==> Signing binaries"
-    # Every Mach-O in the payload, hardened runtime, secure timestamp.
-    find "$STAGE" -type f -perm +111 -print0 | while IFS= read -r -d '' binary; do
-        if file "$binary" | grep -q Mach-O; then
-            codesign --force --timestamp --options runtime \
-                --sign "$SIGN_APP_IDENTITY" "$binary"
-        fi
-    done
+# An installer script, because there is no .pkg to do it.
+cat > "$STAGE/install.sh" <<'INSTALL'
+#!/bin/bash
+# Copies SimpleShrink into place and optionally symlinks it onto the PATH.
+#
+#   ./install.sh [--prefix <dir>] [--link]
+#
+# Default prefix: ~/Library/Application Support/SimpleShrink
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PREFIX="$HOME/Library/Application Support/SimpleShrink"
+LINK=0
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --prefix) PREFIX="$2"; shift 2 ;;
+        --link) LINK=1; shift ;;
+        *) echo "usage: $0 [--prefix <dir>] [--link]" >&2; exit 1 ;;
+    esac
+done
+
+mkdir -p "$PREFIX"
+# bin/ and libexec/ must stay siblings: the tool finds e2fsprogs relative to itself.
+cp -R "$HERE/bin" "$HERE/libexec" "$HERE/share" "$HERE/manifest.json" "$PREFIX/"
+
+# A browser-downloaded archive is quarantined; unpacked files inherit it and Gatekeeper
+# then refuses to run them. Clearing it here is the same decision as unpacking with tar.
+xattr -dr com.apple.quarantine "$PREFIX" 2>/dev/null || true
+
+if [ "$LINK" = 1 ]; then
+    mkdir -p /usr/local/bin
+    ln -sf "$PREFIX/bin/simpleshrink" /usr/local/bin/simpleshrink
+    echo "Linked /usr/local/bin/simpleshrink"
 fi
 
-echo "==> Building the package"
-mkdir -p "$DIST/pkg"
-pkgbuild \
-    --root "$STAGE" \
-    --identifier "$IDENTIFIER" \
-    --version "$VERSION" \
-    --install-location "/" \
-    "$DIST/pkg/component.pkg"
+echo "Installed into $PREFIX"
+"$PREFIX/bin/simpleshrink" version
+INSTALL
+chmod +x "$STAGE/install.sh"
 
-cat > "$DIST/distribution.xml" <<XML
-<?xml version="1.0" encoding="utf-8"?>
-<installer-gui-script minSpecVersion="2">
-    <title>SimpleShrink</title>
-    <options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
-    <domains enable_currentUserHome="true" enable_anywhere="false" enable_localSystem="false"/>
-    <volume-check>
-        <allowed-os-versions><os-version min="15.0"/></allowed-os-versions>
-    </volume-check>
-    <choices-outline><line choice="default"/></choices-outline>
-    <choice id="default" visible="false"><pkg-ref id="$IDENTIFIER"/></choice>
-    <pkg-ref id="$IDENTIFIER" version="$VERSION">component.pkg</pkg-ref>
-</installer-gui-script>
-XML
+echo "==> Signing (identity: $IDENTITY)"
+# arm64 requires at least an ad-hoc signature, and signing everything keeps the payload
+# consistent whether or not a self-signed certificate is available.
+find "$STAGE" -type f -perm +111 -print0 | while IFS= read -r -d '' binary; do
+    if file "$binary" | grep -q Mach-O; then
+        codesign --force --sign "$IDENTITY" "$binary"
+        codesign --verify --strict "$binary"
+        echo "    signed $(basename "$binary")"
+    fi
+done
 
-PKG="$DIST/SimpleShrink-$VERSION.pkg"
-if [ "$DO_SIGN" = 1 ]; then
-    : "${SIGN_INSTALLER_IDENTITY:?set SIGN_INSTALLER_IDENTITY}"
-    productbuild --distribution "$DIST/distribution.xml" --package-path "$DIST/pkg" \
-        --sign "$SIGN_INSTALLER_IDENTITY" "$PKG"
-else
-    productbuild --distribution "$DIST/distribution.xml" --package-path "$DIST/pkg" "$PKG"
-fi
+echo "==> Creating the archive"
+TARBALL="$DIST/$NAME.tar.gz"
+tar -czf "$TARBALL" -C "$DIST" "$NAME"
+(cd "$DIST" && shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
 
-if [ "$DO_NOTARIZE" = 1 ]; then
-    : "${NOTARY_PROFILE:?set NOTARY_PROFILE}"
-    echo "==> Notarising"
-    xcrun notarytool submit "$PKG" --keychain-profile "$NOTARY_PROFILE" --wait
-    xcrun stapler staple "$PKG"
-    xcrun stapler validate "$PKG"
-fi
+cat <<NOTE
 
-echo "==> $PKG"
+==> $TARBALL
+    $(cd "$DIST" && cat "$NAME.tar.gz.sha256")
+
+Unpack with tar in a terminal — Archive Utility would propagate the download's
+quarantine flag to every extracted file:
+
+    tar -xzf $NAME.tar.gz
+    ./$NAME/install.sh --link
+NOTE

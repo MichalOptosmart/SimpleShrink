@@ -27,8 +27,10 @@ First release.
   not last, overlapping entries, non-ext filesystems, external journals, unknown
   filesystem features, an image another run is already working on, and running as root.
 * Recovery from an `hdiutil` attachment left behind by a killed run.
-* `Scripts/build-e2fsprogs.sh`, `make-fixture.sh`, `integration-test.sh`, `package.sh`,
-  and a GitHub Actions workflow that runs unit tests, an end-to-end shrink of a generated
+* `Scripts/build-e2fsprogs.sh`, `make-fixture.sh`, `integration-test.sh`, and
+  `package.sh`, which builds a universal, self-signed tarball with an `install.sh` and a
+  published SHA-256. Releases are not notarised — see [docs/SPEC.md §11](docs/SPEC.md).
+* A GitHub Actions workflow that runs unit tests, an end-to-end shrink of a generated
   fixture, and packaging on tags.
 
 ### Verified

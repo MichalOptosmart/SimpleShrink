@@ -55,20 +55,15 @@ jobs:
     needs: [unit, integration]
     steps:
       - uses: actions/checkout@v4
-      - name: Build the package
-        env:
-          SIGN_APP_IDENTITY: ${{ secrets.SIGN_APP_IDENTITY }}
-          SIGN_INSTALLER_IDENTITY: ${{ secrets.SIGN_INSTALLER_IDENTITY }}
-          NOTARY_PROFILE: ${{ secrets.NOTARY_PROFILE }}
-        # Signing and notarisation only happen when the secrets are configured;
-        # a fork building a tag still gets an unsigned package it can inspect.
-        run: |
-          if [ -n "$SIGN_APP_IDENTITY" ]; then
-            Scripts/package.sh --notarize
-          else
-            Scripts/package.sh
-          fi
+
+      # Ad-hoc signing only: releases are self-signed, never notarised, so this job
+      # needs no secrets and a fork can build an identical archive.
+      - name: Build the release archive
+        run: Scripts/package.sh
+
       - uses: actions/upload-artifact@v4
         with:
-          name: SimpleShrink-pkg
-          path: dist/*.pkg
+          name: SimpleShrink-tarball
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
